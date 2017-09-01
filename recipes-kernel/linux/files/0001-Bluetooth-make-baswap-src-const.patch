@@ -1,0 +1,44 @@
+From eb2ec7af3a286b809464e615b088f0937c1378b9 Mon Sep 17 00:00:00 2001
+From: Loic Poulain <loic.poulain@linaro.org>
+Date: Fri, 1 Sep 2017 17:01:07 +0100
+Subject: [PATCH 1/2] Bluetooth: make baswap src const
+
+Signed-off-by: Loic Poulain <loic.poulain@linaro.org>
+---
+ include/net/bluetooth/bluetooth.h | 2 +-
+ net/bluetooth/lib.c               | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/include/net/bluetooth/bluetooth.h b/include/net/bluetooth/bluetooth.h
+index 01487192f628..020142bb9735 100644
+--- a/include/net/bluetooth/bluetooth.h
++++ b/include/net/bluetooth/bluetooth.h
+@@ -233,7 +233,7 @@ static inline void bacpy(bdaddr_t *dst, const bdaddr_t *src)
+ 	memcpy(dst, src, sizeof(bdaddr_t));
+ }
+ 
+-void baswap(bdaddr_t *dst, bdaddr_t *src);
++void baswap(bdaddr_t *dst, const bdaddr_t *src);
+ 
+ /* Common socket structures and functions */
+ 
+diff --git a/net/bluetooth/lib.c b/net/bluetooth/lib.c
+index aa4cf64e32a6..6048cc07568b 100644
+--- a/net/bluetooth/lib.c
++++ b/net/bluetooth/lib.c
+@@ -30,10 +30,10 @@
+ 
+ #include <net/bluetooth/bluetooth.h>
+ 
+-void baswap(bdaddr_t *dst, bdaddr_t *src)
++void baswap(bdaddr_t *dst, const bdaddr_t *src)
+ {
++	const unsigned char *s = (const unsigned char *) src;
+ 	unsigned char *d = (unsigned char *) dst;
+-	unsigned char *s = (unsigned char *) src;
+ 	unsigned int i;
+ 
+ 	for (i = 0; i < 6; i++)
+-- 
+2.13.0
+

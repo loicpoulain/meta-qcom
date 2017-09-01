@@ -1,0 +1,117 @@
+From 05b022cb6de46979f94b84467b8019b9c5b7cd7a Mon Sep 17 00:00:00 2001
+From: Loic Poulain <loic.poulain@linaro.org>
+Date: Fri, 1 Sep 2017 16:12:42 +0100
+Subject: [PATCH v2] Bluetooth: btqcomsmd: BD address setup
+
+Bluetooth BD address can be retrieved in the same way as
+for wcnss-wlan MAC address. This patch mainly stores the
+local-mac-address property and sets the BD address during
+hci device setup.
+
+If the default BD address is detected, mark the device as
+unconfigured.
+
+Signed-off-by: Loic Poulain <loic.poulain@linaro.org>
+---
+ drivers/bluetooth/btqcomsmd.c | 61 +++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 61 insertions(+)
+
+diff --git a/drivers/bluetooth/btqcomsmd.c b/drivers/bluetooth/btqcomsmd.c
+index ef730c173d4b..9cc715d63d9f 100644
+--- a/drivers/bluetooth/btqcomsmd.c
++++ b/drivers/bluetooth/btqcomsmd.c
+@@ -23,9 +23,12 @@
+ 
+ #include "btqca.h"
+ 
++#define BDADDR_QCOMSMD (&(bdaddr_t) {{0xAD, 0x5A, 0x00, 0x00, 0x00, 0x00}})
++
+ struct btqcomsmd {
+ 	struct hci_dev *hdev;
+ 
++	const bdaddr_t *addr;
+ 	struct rpmsg_endpoint *acl_channel;
+ 	struct rpmsg_endpoint *cmd_channel;
+ };
+@@ -100,6 +103,58 @@ static int btqcomsmd_close(struct hci_dev *hdev)
+ 	return 0;
+ }
+ 
++static int btqcomsmd_setup(struct hci_dev *hdev)
++{
++	struct btqcomsmd *btq = hci_get_drvdata(hdev);
++	struct hci_rp_read_bd_addr *bda;
++	struct sk_buff *skb;
++
++	skb = __hci_cmd_sync(hdev, HCI_OP_RESET, 0, NULL, HCI_INIT_TIMEOUT);
++	if (IS_ERR(skb))
++		return PTR_ERR(skb);
++	kfree_skb(skb);
++
++	if (btq->addr) {
++		bdaddr_t bdaddr;
++
++		/* Having a unique BD address is critical, the retrieved address
++		 * coming from the local-mac-address device-tree property must
++		 * be provisioned with a valid per-device address.
++		 * Usually, this address is added to the DT by the bootloader
++		 * which has access to the provisioned data.
++		 */
++		bt_dev_warn(hdev, "BD address %pM coming from device-tree might"
++			    " be invalid or non-unique", btq->addr);
++
++		/* btq->addr stored with most significant byte first */
++		baswap(&bdaddr, btq->addr);
++		qca_set_bdaddr_rome(hdev, &bdaddr);
++	}
++
++	skb = __hci_cmd_sync(hdev, HCI_OP_READ_BD_ADDR, 0, NULL,
++			     HCI_INIT_TIMEOUT);
++	if (IS_ERR(skb))
++		return PTR_ERR(skb);
++
++	if (skb->len != sizeof(*bda)) {
++		bt_dev_err(hdev, "Device address length mismatch");
++		kfree_skb(skb);
++		return -EIO;
++	}
++
++	/* Mark the controller wirth invalid BD address flag if the
++	 * returned address is the default one (00:00:00:00:5A:AD).
++	 */
++	bda = (struct hci_rp_read_bd_addr *)skb->data;
++	if (!bacmp(&bda->bdaddr, BDADDR_QCOMSMD)) {
++		bt_dev_err(hdev, "Found invalid qcomsmd default address %pMR",
++			   BDADDR_QCOMSMD);
++		set_bit(HCI_QUIRK_INVALID_BDADDR, &hdev->quirks);
++	}
++
++	return 0;
++}
++
+ static int btqcomsmd_probe(struct platform_device *pdev)
+ {
+ 	struct btqcomsmd *btq;
+@@ -123,6 +178,11 @@ static int btqcomsmd_probe(struct platform_device *pdev)
+ 	if (IS_ERR(btq->cmd_channel))
+ 		return PTR_ERR(btq->cmd_channel);
+ 
++	btq->addr = of_get_property(pdev->dev.of_node, "local-mac-address",
++				    &ret);
++	if (ret != sizeof(bdaddr_t))
++		btq->addr = NULL;
++
+ 	hdev = hci_alloc_dev();
+ 	if (!hdev)
+ 		return -ENOMEM;
+@@ -135,6 +195,7 @@ static int btqcomsmd_probe(struct platform_device *pdev)
+ 	hdev->open = btqcomsmd_open;
+ 	hdev->close = btqcomsmd_close;
+ 	hdev->send = btqcomsmd_send;
++	hdev->setup = btqcomsmd_setup;
+ 	hdev->set_bdaddr = qca_set_bdaddr_rome;
+ 
+ 	ret = hci_register_dev(hdev);
+-- 
+2.13.0
+
